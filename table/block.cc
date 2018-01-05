@@ -17,6 +17,7 @@ namespace leveldb {
 
 inline uint32_t Block::NumRestarts() const {
   assert(size_ >= sizeof(uint32_t));
+  // 最后4字节重启点个数
   return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
 }
 
@@ -32,7 +33,7 @@ Block::Block(const BlockContents& contents)
       // The size is too small for NumRestarts()
       size_ = 0;
     } else {
-      restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
+      restart_offset_ = size_ - (1/* 重启点自身 */ + NumRestarts()) * sizeof(uint32_t);
     }
   }
 }
@@ -55,18 +56,21 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
                                       uint32_t* non_shared,
                                       uint32_t* value_length) {
   if (limit - p < 3) return NULL;
+  // 值比较小的情况，加速获取
   *shared = reinterpret_cast<const unsigned char*>(p)[0];
   *non_shared = reinterpret_cast<const unsigned char*>(p)[1];
   *value_length = reinterpret_cast<const unsigned char*>(p)[2];
-  if ((*shared | *non_shared | *value_length) < 128) {
+  if ((*shared | *non_shared | *value_length) < 128) { // 三个值进行或操作
+    // 三个值都小于 128，varint编码都是1字节
     // Fast path: all three values are encoded in one byte each
     p += 3;
   } else {
+    // 老老实实解码varint32
     if ((p = GetVarint32Ptr(p, limit, shared)) == NULL) return NULL;
     if ((p = GetVarint32Ptr(p, limit, non_shared)) == NULL) return NULL;
     if ((p = GetVarint32Ptr(p, limit, value_length)) == NULL) return NULL;
   }
-
+  // 后面的缓存已不够存储 key-value，返回错误
   if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {
     return NULL;
   }
@@ -74,6 +78,7 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
 }
 
 class Block::Iter : public Iterator {
+// 遍历解析 block
  private:
   const Comparator* const comparator_;
   const char* const data_;      // underlying block contents
@@ -167,6 +172,7 @@ class Block::Iter : public Iterator {
     // with a key < target
     uint32_t left = 0;
     uint32_t right = num_restarts_ - 1;
+    // 通过重启点进行二分查找
     while (left < right) {
       uint32_t mid = (left + right + 1) / 2;
       uint32_t region_offset = GetRestartPoint(mid);
@@ -191,6 +197,7 @@ class Block::Iter : public Iterator {
     }
 
     // Linear search (within restart block) for first key >= target
+    // 从left起始点开始线性查找，此时 key[left] <= target，相当于 lower bound
     SeekToRestartPoint(left);
     while (true) {
       if (!ParseNextKey()) {
@@ -227,7 +234,7 @@ class Block::Iter : public Iterator {
     current_ = NextEntryOffset();
     const char* p = data_ + current_;
     const char* limit = data_ + restarts_;  // Restarts come right after data
-    if (p >= limit) {
+    if (p >= limit) { // 偏移以及超过 restart区域
       // No more entries to return.  Mark as invalid.
       current_ = restarts_;
       restart_index_ = num_restarts_;

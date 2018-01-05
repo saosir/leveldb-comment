@@ -141,12 +141,12 @@ class DBImpl : public DB {
   MemTable* imm_;                // Memtable being compacted
   port::AtomicPointer has_imm_;  // So bg thread can detect non-NULL imm_
   WritableFile* logfile_;
-  uint64_t logfile_number_;
-  log::Writer* log_;
+  uint64_t logfile_number_; // 由VersionSet.NewFileNumber创建
+  log::Writer* log_; // 内部操作 logfile_
   uint32_t seed_;                // For sampling.
 
   // Queue of writers.
-  std::deque<Writer*> writers_;
+  std::deque<Writer*> writers_; // 顺序写操作，保证线程安全
   WriteBatch* tmp_batch_;
 
   SnapshotList snapshots_;

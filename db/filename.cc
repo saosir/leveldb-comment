@@ -129,7 +129,7 @@ Status SetCurrentFile(Env* env, const std::string& dbname,
   std::string manifest = DescriptorFileName(dbname, descriptor_number);
   Slice contents = manifest;
   assert(contents.starts_with(dbname + "/"));
-  contents.remove_prefix(dbname.size() + 1);
+  contents.remove_prefix(dbname.size() + 1); // 移除数据库路径前缀
   std::string tmp = TempFileName(dbname, descriptor_number);
   Status s = WriteStringToFileSync(env, contents.ToString() + "\n", tmp);
   if (s.ok()) {

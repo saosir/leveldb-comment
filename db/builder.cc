@@ -13,7 +13,7 @@
 #include "leveldb/iterator.h"
 
 namespace leveldb {
-// 创建 ldb 文件
+// 创建 ldb 文件，写入 data block，index block，footer等信息
 Status BuildTable(const std::string& dbname,
                   Env* env,
                   const Options& options,

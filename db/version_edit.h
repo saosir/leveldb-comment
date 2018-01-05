@@ -89,8 +89,8 @@ class VersionEdit {
   std::string comparator_;
   uint64_t log_number_;
   uint64_t prev_log_number_;
-  uint64_t next_file_number_;
-  SequenceNumber last_sequence_;
+  uint64_t next_file_number_; // log文件名下一个序列号
+  SequenceNumber last_sequence_; // 操作序列号，存于write_batch和 *.log 文件
   bool has_comparator_;
   bool has_log_number_;
   bool has_prev_log_number_;

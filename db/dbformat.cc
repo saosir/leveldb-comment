@@ -122,6 +122,7 @@ LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
   size_t needed = usize + 13;  // A conservative estimate 保守估计
   char* dst;
+  // 默认静态空间不够，从堆中分配
   if (needed <= sizeof(space_)) {
     dst = space_;
   } else {

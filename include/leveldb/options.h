@@ -145,6 +145,7 @@ struct LEVELDB_EXPORT Options {
   // when a database is opened.  This can significantly speed up open.
   //
   // Default: currently false, but may become true later.
+  // 打开数据库的时候是否复用manifest文件，重新创建可以显著 加速打开数据库时间
   bool reuse_logs;
 
   // If non-NULL, use the specified filter policy to reduce disk reads.

@@ -76,6 +76,7 @@ class HandleTable {
   }
 
   LRUHandle* Insert(LRUHandle* h) {
+    // 找不到尾插，找到删除找到元素，同时插入新元素
     LRUHandle** ptr = FindPointer(h->key(), h->hash);
     LRUHandle* old = *ptr;
     h->next_hash = (old == NULL ? NULL : old->next_hash);
@@ -94,6 +95,7 @@ class HandleTable {
   LRUHandle* Remove(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = FindPointer(key, hash);
     LRUHandle* result = *ptr;
+    // FindPointer 返回指针的指针，可以直接修改上一个元素的 next_hash 指向 result 下一个元素
     if (result != NULL) {
       *ptr = result->next_hash;
       --elems_;
@@ -104,15 +106,16 @@ class HandleTable {
  private:
   // The table consists of an array of buckets where each bucket is
   // a linked list of cache entries that hash into the bucket.
-  uint32_t length_;
-  uint32_t elems_;
-  LRUHandle** list_;
+  uint32_t length_; // list_ 数组长度
+  uint32_t elems_; // 目前元素数量，为了避免频繁碰撞，算法保证 elems_ <= length_
+  LRUHandle** list_; // 链表桶
 
   // Return a pointer to slot that points to a cache entry that
   // matches key/hash.  If there is no such cache entry, return a
   // pointer to the trailing slot in the corresponding linked list.
   LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
+    // 遍历桶链表查找
     while (*ptr != NULL &&
            ((*ptr)->hash != hash || key != (*ptr)->key())) {
       ptr = &(*ptr)->next_hash;
@@ -121,19 +124,23 @@ class HandleTable {
   }
 
   void Resize() {
+    // 默认最小 4 个 链表桶
     uint32_t new_length = 4;
     while (new_length < elems_) {
       new_length *= 2;
     }
+    // 重新分配
     LRUHandle** new_list = new LRUHandle*[new_length];
     memset(new_list, 0, sizeof(new_list[0]) * new_length);
     uint32_t count = 0;
+    // 重hash
     for (uint32_t i = 0; i < length_; i++) {
       LRUHandle* h = list_[i];
       while (h != NULL) {
         LRUHandle* next = h->next_hash;
         uint32_t hash = h->hash;
         LRUHandle** ptr = &new_list[hash & (new_length - 1)];
+        // 头插入
         h->next_hash = *ptr;
         *ptr = h;
         h = next;
@@ -218,8 +225,8 @@ LRUCache::~LRUCache() {
 
 void LRUCache::Ref(LRUHandle* e) {
   if (e->refs == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
-    LRU_Remove(e);
-    LRU_Append(&in_use_, e);
+    LRU_Remove(e); // 原链表移除
+    LRU_Append(&in_use_, e); // 插入 in_use_ 链表
   }
   e->refs++;
 }

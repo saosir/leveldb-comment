@@ -175,6 +175,7 @@ DBImpl::~DBImpl() {
 }
 
 Status DBImpl::NewDB() {
+  // 第一次创建leveldb
   VersionEdit new_db;
   new_db.SetComparatorName(user_comparator()->Name());
   new_db.SetLogNumber(0);
@@ -216,6 +217,7 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
 }
 
 void DBImpl::DeleteObsoleteFiles() {
+  // 清除不必要文件
   if (!bg_error_.ok()) {
     // After a background error, we don't know whether a new version may
     // or may not have been committed, so we cannot safely garbage collect.
@@ -283,7 +285,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   if (!s.ok()) {
     return s;
   }
-
+  // 数据集不存在，创建文件初始化
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       s = NewDB();
@@ -305,7 +307,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   if (!s.ok()) {
     return s;
   }
-  SequenceNumber max_sequence(0);
+  SequenceNumber max_sequence(0); // 操作记录最大序列号
 
   // Recover from all newer log files than the ones named in the
   // descriptor (new log files may have been added by the previous
@@ -325,7 +327,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   versions_->AddLiveFiles(&expected);
   uint64_t number;
   FileType type;
-  std::vector<uint64_t> logs;
+  std::vector<uint64_t> logs; // .log文件集合
+  // 获取所有 log 文件
   for (size_t i = 0; i < filenames.size(); i++) {
     // 根据文件名取得文件类型与文件编号
     if (ParseFileName(filenames[i], &number, &type)) {
@@ -334,7 +337,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
         logs.push_back(number);
     }
   }
-  // 确保dbname目录下的文件都被处理
+  // 确保dbname目录下的文件都是合法文件，能正常解析文件名
   if (!expected.empty()) {
     char buf[50];
     snprintf(buf, sizeof(buf), "%d missing files; e.g.",
@@ -343,6 +346,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   }
 
   // Recover in the order in which the logs were generated
+  // 顺序通过log文件恢复到memtable，如果memtable超过限值进行compation
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
@@ -354,7 +358,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
     // The previous incarnation may not have written any MANIFEST
     // records after allocating this log number.  So we manually
     // update the file number allocation counter in VersionSet.
-    versions_->MarkFileNumberUsed(logs[i]);
+    versions_->MarkFileNumberUsed(logs[i]); // 记录最大的 log number
   }
 
   if (versions_->LastSequence() < max_sequence) {
@@ -366,7 +370,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
 
 Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
                               bool* save_manifest, VersionEdit* edit,
-                              SequenceNumber* max_sequence) {
+                              SequenceNumber* max_sequence/* log 操作记录最大的 seq */) {
   struct LogReporter : public log::Reader::Reporter {
     Env* env;
     Logger* info_log;
@@ -407,6 +411,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       (unsigned long long) log_number);
 
   // Read all the records and add to a memtable
+  // 读取所有记录构建memtable
   std::string scratch;
   Slice record;
   WriteBatch batch;
@@ -455,6 +460,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
 
   delete file;
 
+  // 是否需要继续使用最后一个log文件
   // See if we should keep reusing the last log file.
   if (status.ok() && options_.reuse_logs && last_log && compactions == 0) {
     assert(logfile_ == NULL);
@@ -464,7 +470,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     if (env_->GetFileSize(fname, &lfile_size).ok() &&
         env_->NewAppendableFile(fname, &logfile_).ok()) {
       Log(options_.info_log, "Reusing old log %s \n", fname.c_str());
-      log_ = new log::Writer(logfile_, lfile_size);
+      log_ = new log::Writer(logfile_/* 继续追加内容到尾部 */, lfile_size/* 计算得到块内偏移 */);
       logfile_number_ = log_number;
       if (mem != NULL) {
         mem_ = mem;
@@ -476,7 +482,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       }
     }
   }
-
+  // 每次都将从log文件得到memtable compation，如果开启 resue_logs 选项，最后一个log文件例外
   if (mem != NULL) {
     // mem did not get reused; compact it.
     if (status.ok()) {
@@ -1137,6 +1143,7 @@ Status DBImpl::Get(const ReadOptions& options,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
+    // memtabl -> immutable
     if (mem->Get(lkey, value, &s)) {
       // Done
     } else if (imm != NULL && imm->Get(lkey, value, &s)) {
@@ -1203,20 +1210,25 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
 
   MutexLock l(&mutex_);
   writers_.push_back(&w);
+  // 等待前面的写请求完成
   while (!w.done && &w != writers_.front()) {
     w.cv.Wait();
   }
+  // 有可能在其他线程中已经完成写入
   if (w.done) {
     return w.status;
   }
-
+  // 执行到此处满足 &w == writers_.front() 同时 w.cv 状态为 signaled
   // May temporarily unlock and wait.
   Status status = MakeRoomForWrite(my_batch == NULL);
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
+  // 更新 log 文件与 memtable
+  // 批量写入在 writers_ 中的数据记录
   if (status.ok() && my_batch != NULL) {  // NULL batch is for compactions
     WriteBatch* updates = BuildBatchGroup(&last_writer);
     WriteBatchInternal::SetSequence(updates, last_sequence + 1);
+    // 递增 log 文件的 seq
     last_sequence += WriteBatchInternal::Count(updates);
 
     // Add to log and apply to memtable.  We can release the lock
@@ -1224,15 +1236,17 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
     // and protects against concurrent loggers and concurrent writes
     // into mem_.
     {
-      mutex_.Unlock();
+      mutex_.Unlock(); // 临时释放锁，w 在 writers_ 第一个位置
+      // 写入log文件
       status = log_->AddRecord(WriteBatchInternal::Contents(updates));
       bool sync_error = false;
       if (status.ok() && options.sync) {
-        status = logfile_->Sync();
+        status = logfile_->Sync(); // 将 log_ 内容 同步到磁盘
         if (!status.ok()) {
           sync_error = true;
         }
       }
+      // 同步 memtable
       if (status.ok()) {
         status = WriteBatchInternal::InsertInto(updates, mem_);
       }
@@ -1244,15 +1258,16 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
         RecordBackgroundError(status);
       }
     }
+    // 在 BuildBatchGroup 如果writers_有多个writer，updates会指向tmp_batch_，要及时清理
     if (updates == tmp_batch_) tmp_batch_->Clear();
-
+    // 更新操作的seq序列号
     versions_->SetLastSequence(last_sequence);
   }
 
   while (true) {
     Writer* ready = writers_.front();
     writers_.pop_front();
-    if (ready != &w) {
+    if (ready != &w) { // w.cv 已经为 signaled 状态
       ready->status = status;
       ready->done = true;
       ready->cv.Signal();
@@ -1261,6 +1276,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
   }
 
   // Notify new head of write queue
+  // 在写入log文件过程中，有新的数据到来，通知后面的写操作可以执行写入
   if (!writers_.empty()) {
     writers_.front()->cv.Signal();
   }
@@ -1271,6 +1287,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
 // REQUIRES: Writer list must be non-empty
 // REQUIRES: First writer must have a non-NULL batch
 WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
+  // 合并writers_里的batch，统一写到一个batch
   assert(!writers_.empty());
   Writer* first = writers_.front();
   WriteBatch* result = first->batch;
@@ -1304,6 +1321,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
       }
 
       // Append to *result
+      // 第一次的时候为 first，防止后面的batch写到first，统一合并到 tmp_batch_
       if (result == first->batch) {
         // Switch to temporary batch instead of disturbing caller's batch
         result = tmp_batch_;
@@ -1366,6 +1384,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
         versions_->ReuseFileNumber(new_log_number);
         break;
       }
+      // 创新创建log文件，memtable转为immemtable
       delete log_;
       delete logfile_;
       logfile_ = lfile;
@@ -1500,7 +1519,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false;
-  Status s = impl->Recover(&edit, &save_manifest);
+  Status s = impl->Recover(&edit /* log文件恢复有可能生成ldb文件 */, &save_manifest);
   if (s.ok() && impl->mem_ == NULL) {
     // Create new log and a corresponding memtable.
     // 没有memtable，创建log文件和与log关联的memtable

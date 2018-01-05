@@ -307,6 +307,7 @@ class VersionSet {
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
+  // manifest文件
   WritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
   // 链表头

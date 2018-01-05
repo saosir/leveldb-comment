@@ -44,17 +44,21 @@ TableCache::~TableCache() {
 
 Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
                              Cache::Handle** handle) {
+  // 从 ldb 文件查找，读取 ldb文件
   Status s;
   char buf[sizeof(file_number)];
   EncodeFixed64(buf, file_number);
+  // 将 file_number 作为 key 查找 cache 是否已经打开了 ldb 文件
   Slice key(buf, sizeof(buf));
   *handle = cache_->Lookup(key);
+  // 内存中不存在对应的 ldb 文件，打开读取并插入 cache
   if (*handle == NULL) {
     std::string fname = TableFileName(dbname_, file_number);
     RandomAccessFile* file = NULL;
     Table* table = NULL;
     s = env_->NewRandomAccessFile(fname, &file);
     if (!s.ok()) {
+      // 老版本兼容 .stt 后缀
       std::string old_fname = SSTTableFileName(dbname_, file_number);
       if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
         s = Status::OK();
@@ -112,6 +116,7 @@ Status TableCache::Get(const ReadOptions& options,
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    // 从 sstable 中查找
     s = t->InternalGet(options, k, arg, saver);
     cache_->Release(handle);
   }

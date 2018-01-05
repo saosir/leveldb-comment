@@ -46,6 +46,7 @@ Status Table::Open(const Options& options,
 
   char footer_space[Footer::kEncodedLength];
   Slice footer_input;
+  // 读取 footer
   Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
                         &footer_input, footer_space);
   if (!s.ok()) return s;
@@ -54,13 +55,14 @@ Status Table::Open(const Options& options,
   s = footer.DecodeFrom(&footer_input);
   if (!s.ok()) return s;
 
-  // Read the index block
+  // Read the index block 读取 index block
   BlockContents index_block_contents;
   if (s.ok()) {
     ReadOptions opt;
     if (options.paranoid_checks) {
       opt.verify_checksums = true;
     }
+    // 根据 index handle 读取 index block
     s = ReadBlock(file, opt, footer.index_handle(), &index_block_contents);
   }
 
@@ -174,6 +176,7 @@ Iterator* Table::BlockReader(void* arg,
     BlockContents contents;
     if (block_cache != NULL) {
       char cache_key_buffer[16];
+      // cache_id | offset
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
       EncodeFixed64(cache_key_buffer+8, handle.offset());
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
@@ -201,6 +204,7 @@ Iterator* Table::BlockReader(void* arg,
   Iterator* iter;
   if (block != NULL) {
     iter = block->NewIterator(table->rep_->options.comparator);
+    // 像迭代器注册资源释放回调函数
     if (cache_handle == NULL) {
       iter->RegisterCleanup(&DeleteBlock, block, NULL);
     } else {
@@ -222,9 +226,11 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
                           void* arg,
                           void (*saver)(void*, const Slice&, const Slice&)) {
   Status s;
+  // 由 index block 索引到 data block
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->Seek(k);
   if (iiter->Valid()) {
+    // 定位到
     Slice handle_value = iiter->value();
     FilterBlockReader* filter = rep_->filter;
     BlockHandle handle;
@@ -235,6 +241,7 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
     } else {
       Iterator* block_iter = BlockReader(this, options, iiter->value());
       block_iter->Seek(k);
+      // 找到元素
       if (block_iter->Valid()) {
         (*saver)(arg, block_iter->key(), block_iter->value());
       }

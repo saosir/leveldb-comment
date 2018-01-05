@@ -365,6 +365,7 @@ Status Version::Get(const ReadOptions& options,
     if (level == 0) {
       // Level-0 files may overlap each other.  Find all files that
       // overlap user_key and process them in order from newest to oldest.
+      // level-0 的 ldb 文件有重合，先对文件排序，找出最新的数据节点
       tmp.reserve(num_files);
       for (uint32_t i = 0; i < num_files; i++) {
         FileMetaData* f = files[i];
@@ -374,7 +375,7 @@ Status Version::Get(const ReadOptions& options,
         }
       }
       if (tmp.empty()) continue;
-
+      // 逆序排序,最新的在最前面
       std::sort(tmp.begin(), tmp.end(), NewestFirst);
       files = &tmp[0];
       num_files = tmp.size();
@@ -718,7 +719,7 @@ class VersionSet::Builder {
       f->allowed_seeks = (f->file_size / 16384);
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
-      levels_[level].deleted_files.erase(f->number);
+      levels_[level].deleted_files.erase(f->number); // add file 需要从 delete_files 中删除
       levels_[level].added_files->insert(f);
     }
   }
@@ -730,23 +731,24 @@ class VersionSet::Builder {
     for (int level = 0; level < config::kNumLevels; level++) {
       // Merge the set of added files with the set of pre-existing files.
       // Drop any deleted files.  Store the result in *v.
-      const std::vector<FileMetaData*>& base_files = base_->files_[level]; // verctor<FileMetaData*>
+      const std::vector<FileMetaData*>& base_files = base_->files_[level]; // base version verctor<FileMetaData*>
       std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
       std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
-      const FileSet* added = levels_[level].added_files;
+      const FileSet* added = levels_[level].added_files; // 从manifest version_edit 获取
       v->files_[level].reserve(base_files.size() + added->size());
-      // 按顺序将base_->files_   [level] 和levels_[level].added_files合并到 v->files_
+      // 按顺序将base_->files_   [level] 和levels_[level].added_files(由log文件解析到的version_edit得到)合并到 v->files_[level]
       for (FileSet::const_iterator added_iter = added->begin();
            added_iter != added->end();
            ++added_iter) {
         // Add all smaller files listed in base_
+        // 按顺序将 base version 的文件添加到集合
         for (std::vector<FileMetaData*>::const_iterator bpos
                  = std::upper_bound(base_iter, base_end, *added_iter, cmp);
              base_iter != bpos;
              ++base_iter) {
           MaybeAddFile(v, level, *base_iter);
         }
-
+        // 添加 从manifest 获取到的version_edit
         MaybeAddFile(v, level, *added_iter);
       }
 
@@ -864,10 +866,12 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   // a temporary file that contains a snapshot of the current version.
   std::string new_manifest_file;
   Status s;
+  // 将当前的leveldb快照写入 manifest 文件
   if (descriptor_log_ == NULL) {
     // No reason to unlock *mu here since we only hit this path in the
     // first call to LogAndApply (when opening the database).
     assert(descriptor_file_ == NULL);
+    // manifest文件名
     new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
     edit->SetNextFile(next_file_number_);
     s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
@@ -896,6 +900,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
     // If we just created a new descriptor file, install it by writing a
     // new CURRENT file that points to it.
+    // 启动的时候第一次创建manifest，更新CURRENT文件
     if (s.ok() && !new_manifest_file.empty()) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
@@ -986,7 +991,7 @@ Status VersionSet::Recover(bool *save_manifest) {
       if (s.ok()) {
         builder.Apply(&edit);
       }
-
+      // 可能有多个值，但是最新的值会覆盖旧值
       if (edit.has_log_number_) {
         log_number = edit.log_number_;
         have_log_number = true;
@@ -1008,6 +1013,7 @@ Status VersionSet::Recover(bool *save_manifest) {
       }
     }
   }
+  // 关闭 manifest 文件
   delete file;
   file = NULL;
 
@@ -1044,6 +1050,7 @@ Status VersionSet::Recover(bool *save_manifest) {
     prev_log_number_ = prev_log_number;
 
     // See if we can reuse the existing MANIFEST file.
+    // 如果重用 manifest 文件，使用 open(filename, "a+") 打开
     if (ReuseManifest(dscname, current)) {
       // No need to save new manifest
     } else {
@@ -1065,13 +1072,14 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
   if (!ParseFileName(dscbase, &manifest_number, &manifest_type) ||
       manifest_type != kDescriptorFile ||
       !env_->GetFileSize(dscname, &manifest_size).ok() ||
-      // Make new compacted MANIFEST if old one is too big
+      // Make new compacted MANIFEST if old one is too big manifest 文件过大
       manifest_size >= TargetFileSize(options_)) {
     return false;
   }
 
   assert(descriptor_file_ == NULL);
   assert(descriptor_log_ == NULL);
+  // 创建文件描述符
   Status r = env_->NewAppendableFile(dscname, &descriptor_file_);
   if (!r.ok()) {
     Log(options_->info_log, "Reuse MANIFEST: %s\n", r.ToString().c_str());
@@ -1216,6 +1224,7 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
 }
 
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
+  // 所有版本每一层level的ldb文件放入live
   for (Version* v = dummy_versions_.next_;
        v != &dummy_versions_;
        v = v->next_) {

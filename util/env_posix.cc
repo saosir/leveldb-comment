@@ -665,6 +665,7 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   PthreadCall("lock", pthread_mutex_lock(&mu_));
 
   // Start background thread if necessary
+  // 第一次启动的时候创建线程
   if (!started_bgthread_) {
     started_bgthread_ = true;
     PthreadCall(
@@ -677,7 +678,7 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   if (queue_.empty()) {
     PthreadCall("signal", pthread_cond_signal(&bgsignal_));
   }
-
+  // 将任务放入队列
   // Add to priority queue
   queue_.push_back(BGItem());
   queue_.back().function = function;
@@ -687,6 +688,7 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
 }
 
 void PosixEnv::BGThread() {
+  // 后端线程一直死循环
   while (true) {
     // Wait until there is an item that is ready to run
     PthreadCall("lock", pthread_mutex_lock(&mu_));
