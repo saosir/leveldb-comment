@@ -51,8 +51,9 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
   // 将 file_number 作为 key 查找 cache 是否已经打开了 ldb 文件
   Slice key(buf, sizeof(buf));
   *handle = cache_->Lookup(key);
-  // 内存中不存在对应的 ldb 文件，打开读取并插入 cache
+  // 内存cache中不存在对应的 ldb 文件，打开读取并插入 cache
   if (*handle == NULL) {
+    // .ldb 后缀
     std::string fname = TableFileName(dbname_, file_number);
     RandomAccessFile* file = NULL;
     Table* table = NULL;
@@ -74,6 +75,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
       // We do not cache error results so that if the error is transient,
       // or somebody repairs the file, we recover automatically.
     } else {
+     // 插入cache
       TableAndFile* tf = new TableAndFile;
       tf->file = file;
       tf->table = table;

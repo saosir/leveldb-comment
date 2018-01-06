@@ -279,6 +279,7 @@ static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
   if (!ParseInternalKey(ikey, &parsed_key)) {
     s->state = kCorrupt;
   } else {
+    // 确保ikey与用户所要查找的key相同
     if (s->ucmp->Compare(parsed_key.user_key, s->user_key) == 0) {
       s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
       if (s->state == kFound) {

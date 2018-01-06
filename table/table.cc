@@ -39,6 +39,7 @@ Status Table::Open(const Options& options,
                    RandomAccessFile* file,
                    uint64_t size,
                    Table** table) {
+  // ldb 文件打开读取
   *table = NULL;
   if (size < Footer::kEncodedLength) {
     return Status::Corruption("file is too short to be an sstable");
@@ -62,7 +63,7 @@ Status Table::Open(const Options& options,
     if (options.paranoid_checks) {
       opt.verify_checksums = true;
     }
-    // 根据 index handle 读取 index block
+    // 根据   footer 中存储的 index handle 读取 index block
     s = ReadBlock(file, opt, footer.index_handle(), &index_block_contents);
   }
 
@@ -176,7 +177,7 @@ Iterator* Table::BlockReader(void* arg,
     BlockContents contents;
     if (block_cache != NULL) {
       char cache_key_buffer[16];
-      // cache_id | offset
+      // cache_id | offset 作为键从cache获取
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
       EncodeFixed64(cache_key_buffer+8, handle.offset());
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
@@ -184,6 +185,7 @@ Iterator* Table::BlockReader(void* arg,
       if (cache_handle != NULL) {
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
       } else {
+        // 未找到cache从文件中读取data block 并插入cache
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
           block = new Block(contents);
@@ -194,6 +196,7 @@ Iterator* Table::BlockReader(void* arg,
         }
       }
     } else {
+      // 不适用cache的情况，直接读取 ldb 文件
       s = ReadBlock(table->rep_->file, options, handle, &contents);
       if (s.ok()) {
         block = new Block(contents);
@@ -227,10 +230,11 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
                           void (*saver)(void*, const Slice&, const Slice&)) {
   Status s;
   // 由 index block 索引到 data block
-  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);  
+  // 定位到大于等于k的第一个元素
   iiter->Seek(k);
   if (iiter->Valid()) {
-    // 定位到
+    // 获取到block handle，并得到对应的 data block
     Slice handle_value = iiter->value();
     FilterBlockReader* filter = rep_->filter;
     BlockHandle handle;
@@ -240,8 +244,8 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
       // Not found
     } else {
       Iterator* block_iter = BlockReader(this, options, iiter->value());
+      // 定位到大于等于k的第一个元素
       block_iter->Seek(k);
-      // 找到元素
       if (block_iter->Valid()) {
         (*saver)(arg, block_iter->key(), block_iter->value());
       }

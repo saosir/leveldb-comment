@@ -197,7 +197,7 @@ class Block::Iter : public Iterator {
     }
 
     // Linear search (within restart block) for first key >= target
-    // 从left起始点开始线性查找，此时 key[left] <= target，相当于 lower bound
+    // 从left起始点开始线性查找，此时 key[left] < target，相当于 lower bound
     SeekToRestartPoint(left);
     while (true) {
       if (!ParseNextKey()) {

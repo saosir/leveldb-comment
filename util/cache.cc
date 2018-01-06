@@ -67,6 +67,7 @@ struct LRUHandle {
 // we have tested.  E.g., readrandom speeds up by ~5% over the g++
 // 4.4.3's builtin hashtable.
 class HandleTable {
+ // 桶哈希表
  public:
   HandleTable() : length_(0), elems_(0), list_(NULL) { Resize(); }
   ~HandleTable() { delete[] list_; }
@@ -193,10 +194,12 @@ class LRUCache {
   // Dummy head of LRU list.
   // lru.prev is newest entry, lru.next is oldest entry.
   // Entries have refs==1 and in_cache==true.
+  // lru 链表，表尾最新
   LRUHandle lru_;
 
   // Dummy head of in-use list.
   // Entries are in use by clients, and have refs >= 2 and in_cache==true.
+  // 说明节点在被外部使用当中， refs >= 2
   LRUHandle in_use_;
 
   HandleTable table_;
@@ -225,7 +228,7 @@ LRUCache::~LRUCache() {
 
 void LRUCache::Ref(LRUHandle* e) {
   if (e->refs == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
-    LRU_Remove(e); // 原链表移除
+    LRU_Remove(e); // lru_链表移除
     LRU_Append(&in_use_, e); // 插入 in_use_ 链表
   }
   e->refs++;
@@ -261,7 +264,7 @@ Cache::Handle* LRUCache::Lookup(const Slice& key, uint32_t hash) {
   MutexLock l(&mutex_);
   LRUHandle* e = table_.Lookup(key, hash);
   if (e != NULL) {
-    Ref(e);
+    Ref(e); // 需要返回，增加引用
   }
   return reinterpret_cast<Cache::Handle*>(e);
 }
@@ -288,15 +291,17 @@ Cache::Handle* LRUCache::Insert(
   memcpy(e->key_data, key.data(), key.size());
 
   if (capacity_ > 0) {
+    // 插入缓存 refs == 2，因为返回值为e，因此在链表 in_use_
     e->refs++;  // for the cache's reference.
     e->in_cache = true;
     LRU_Append(&in_use_, e);
     usage_ += charge;
-    FinishErase(table_.Insert(e));
+    FinishErase(table_.Insert(e)); // table_.Insert 操作有可能返回旧的节点，此处从cache中删除
   } else {  // don't cache. (capacity_==0 is supported and turns off caching.)
     // next is read by key() in an assert, so it must be initialized
     e->next = NULL;
   }
+  // 容量较大，需要删除旧缓存
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
@@ -328,6 +333,7 @@ void LRUCache::Erase(const Slice& key, uint32_t hash) {
 }
 
 void LRUCache::Prune() {
+  // 清空缓存
   MutexLock l(&mutex_);
   while (lru_.next != &lru_) {
     LRUHandle* e = lru_.next;
@@ -338,13 +344,14 @@ void LRUCache::Prune() {
     }
   }
 }
-
+// 16 shard
 static const int kNumShardBits = 4;
 static const int kNumShards = 1 << kNumShardBits;
 
 class ShardedLRUCache : public Cache {
+  // 增加分片空能，每个插入进来的节点哈希到某个缓存节点
  private:
-  LRUCache shard_[kNumShards];
+  LRUCache shard_[kNumShards]; // 根据 hash 的高4位的值作为下标分配到对应的 shard_
   port::Mutex id_mutex_;
   uint64_t last_id_;
 
