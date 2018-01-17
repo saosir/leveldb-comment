@@ -66,6 +66,7 @@ Status ReadBlock(RandomAccessFile* file,
                  const ReadOptions& options,
                  const BlockHandle& handle,
                  BlockContents* result) {
+  // 通过 sstable 文件句柄 file 和 handle 定位到 block，然后读取到 result
   result->data = Slice();
   result->cachable = false;
   result->heap_allocated = false;
@@ -73,7 +74,7 @@ Status ReadBlock(RandomAccessFile* file,
   // Read the block contents as well as the type/crc footer.
   // See table_builder.cc for the code that built this structure.
   size_t n = static_cast<size_t>(handle.size());
-  char* buf = new char[n + kBlockTrailerSize]; // data size 加上 1 字节type 4字节crc
+  char* buf = new char[n + kBlockTrailerSize]; // 块大小n字节  1字节type 4字节crc
   Slice contents;
   Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents, buf);
   if (!s.ok()) {

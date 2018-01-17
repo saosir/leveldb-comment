@@ -357,6 +357,8 @@ Status Version::Get(const ReadOptions& options,
   // in an smaller level, later levels are irrelevant.
   std::vector<FileMetaData*> tmp;
   FileMetaData* tmp2;
+  // 根据file_中存储的每层ldb文件元信息FileMetaData
+  // 逐层查找，从最低 level-0 开始
   for (int level = 0; level < config::kNumLevels; level++) {
     size_t num_files = files_[level].size();
     if (num_files == 0) continue;
@@ -366,7 +368,8 @@ Status Version::Get(const ReadOptions& options,
     if (level == 0) {
       // Level-0 files may overlap each other.  Find all files that
       // overlap user_key and process them in order from newest to oldest.
-      // level-0 的 ldb 文件有重合，先对文件排序，找出最新的数据节点
+      // level-0 的 ldb 文件有重合，先得到所有level-0中范围包含ikey的ldb文件，
+      // 然后对文件进行排序，最新的ldb文件排在前面
       tmp.reserve(num_files);
       for (uint32_t i = 0; i < num_files; i++) {
         FileMetaData* f = files[i];
@@ -381,6 +384,7 @@ Status Version::Get(const ReadOptions& options,
       files = &tmp[0];
       num_files = tmp.size();
     } else {
+      // 非level-0层ldb文件进行二分查找
       // Binary search to find earliest index whose largest key >= ikey.
       uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
       if (index >= num_files) {
@@ -398,10 +402,11 @@ Status Version::Get(const ReadOptions& options,
         }
       }
     }
-
+    // 定位到对应的 ldb 文件，从文件中查找
     for (uint32_t i = 0; i < num_files; ++i) {
       if (last_file_read != NULL && stats->seek_file == NULL) {
         // We have had more than one seek for this read.  Charge the 1st file.
+        // 记录第一个查询的 ldb 文件
         stats->seek_file = last_file_read;
         stats->seek_file_level = last_file_read_level;
       }
@@ -416,7 +421,7 @@ Status Version::Get(const ReadOptions& options,
       saver.user_key = user_key;
       saver.value = value;
       s = vset_->table_cache_->Get(options, f->number, f->file_size,
-                                   ikey, &saver, SaveValue);
+                                   ikey, &saver, SaveValue);// SaveValue 函数会进一步判断查找到的key是否真的是要查询的key
       if (!s.ok()) {
         return s;
       }
@@ -512,6 +517,7 @@ bool Version::OverlapInLevel(int level,
 int Version::PickLevelForMemTableOutput(
     const Slice& smallest_user_key,
     const Slice& largest_user_key) {
+  // 确认将 memtable 文件放入拿一层，如果与下一层有交集，则放入当前level中
   int level = 0;
   if (!OverlapInLevel(0, &smallest_user_key, &largest_user_key)) {
     // Push to next level if there is no overlap in next level,
@@ -566,12 +572,13 @@ void Version::GetOverlappingInputs(
     } else if (end != NULL && user_cmp->Compare(file_start, user_end) > 0) {
       // "f" is completely after specified range; skip it
     } else {
-      // 有交集
+      // 与ldb文件f有交集
       inputs->push_back(f);
       if (level == 0) {
         // Level-0 files may overlap each other.  So check if the newly
         // added file has expanded the range.  If so, restart search.
         // level-0比较特殊，各个level-0文件可能存在交集
+        // 扩展范围，重新扫描
         if (begin != NULL && user_cmp->Compare(file_start, user_begin) < 0) {
           user_begin = file_start;
           inputs->clear();
@@ -867,7 +874,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   // a temporary file that contains a snapshot of the current version.
   std::string new_manifest_file;
   Status s;
-  // 将当前的leveldb快照写入 manifest 文件
+  // 将当前的leveldb快照写入 manifest 文件，如果 manifest 文件没有打开则打开
   if (descriptor_log_ == NULL) {
     // No reason to unlock *mu here since we only hit this path in the
     // first call to LogAndApply (when opening the database).
@@ -1143,7 +1150,7 @@ void VersionSet::Finalize(Version* v) {
 
 Status VersionSet::WriteSnapshot(log::Writer* log) {
   // TODO: Break up into multiple records to reduce memory usage on recovery?
-
+  // 将 leveldb 中 ldb 文件布局写入 mainfest
   // Save metadata
   VersionEdit edit;
   edit.SetComparatorName(icmp_.user_comparator()->Name());
@@ -1264,6 +1271,7 @@ int64_t VersionSet::MaxNextLevelOverlappingBytes() {
 // Stores the minimal range that covers all entries in inputs in
 // *smallest, *largest.
 // REQUIRES: inputs is not empty
+// 得到 inputs 中key的最大、最小范围区间
 void VersionSet::GetRange(const std::vector<FileMetaData*>& inputs,
                           InternalKey* smallest,
                           InternalKey* largest) {
@@ -1334,35 +1342,41 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
 Compaction* VersionSet::PickCompaction() {
   Compaction* c;
   int level;
-
+  // 从 level L 选出需要 compact 的文件
   // We prefer compactions triggered by too much data in a level over
   // the compactions triggered by seeks.
   const bool size_compaction = (current_->compaction_score_ >= 1);
   const bool seek_compaction = (current_->file_to_compact_ != NULL);
   if (size_compaction) {
+    // 数据过多, level 层需要进行 compact
     level = current_->compaction_level_;
     assert(level >= 0);
     assert(level+1 < config::kNumLevels);
     c = new Compaction(options_, level);
 
     // Pick the first file that comes after compact_pointer_[level]
+    // 找到 compact_pointer_[level] 后续第一个 ldb 文件
     for (size_t i = 0; i < current_->files_[level].size(); i++) {
       FileMetaData* f = current_->files_[level][i];
       if (compact_pointer_[level].empty() ||
           icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
         c->inputs_[0].push_back(f);
+        // 只 push_back 一个 FileMetaData 即跳出循环
         break;
       }
     }
+    // 没有找到应该进行compact的ldb，取 level 层第一个ldb文件
     if (c->inputs_[0].empty()) {
       // Wrap-around to the beginning of the key space
       c->inputs_[0].push_back(current_->files_[level][0]);
     }
   } else if (seek_compaction) {
+    // seek过多导致需要对某个ldb文件进行compact
     level = current_->file_to_compact_level_;
     c = new Compaction(options_, level);
     c->inputs_[0].push_back(current_->file_to_compact_);
   } else {
+    // 不需要进行 compact
     return NULL;
   }
 
@@ -1370,12 +1384,15 @@ Compaction* VersionSet::PickCompaction() {
   c->input_version_->Ref();
 
   // Files in level 0 may overlap each other, so pick up all overlapping ones
+  // level 0 比较特殊， ldb 文件之间可能互相重叠，取出与 c->inputs_[0] 重叠的所有
+  // ldb 文件
   if (level == 0) {
     InternalKey smallest, largest;
     GetRange(c->inputs_[0], &smallest, &largest);
     // Note that the next call will discard the file we placed in
     // c->inputs_[0] earlier and replace it with an overlapping set
     // which will include the picked file.
+    // 下一次 compact 会丢弃在 c->inputs_[0] 中的所有文件
     current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
     assert(!c->inputs_[0].empty());
   }
@@ -1389,16 +1406,18 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   const int level = c->level();
   InternalKey smallest, largest;
   GetRange(c->inputs_[0], &smallest, &largest);
-
+  // 取出与 c->inpouts_[0] 重叠的 level L+1 文件，放到 c->inoputs_[1]
   current_->GetOverlappingInputs(level+1, &smallest, &largest, &c->inputs_[1]);
 
   // Get entire range covered by compaction
+  // 得到 c->inputs_ 的范围
   InternalKey all_start, all_limit;
   GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
 
   // See if we can grow the number of inputs in "level" without
   // changing the number of "level+1" files we pick up.
-  if (!c->inputs_[1].empty()) {
+  // 是否可以增加 inputs_[0] 的情况下不改变 inputs_[1]
+  if (!c->inputs_[1].empty()) { // level L+1 非空
     std::vector<FileMetaData*> expanded0;
     current_->GetOverlappingInputs(level, &all_start, &all_limit, &expanded0);
     const int64_t inputs0_size = TotalFileSize(c->inputs_[0]);
@@ -1442,6 +1461,7 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
   // key range next time.
+  // 保存当前最大的key，下次compact从这个key开始
   compact_pointer_[level] = largest.Encode().ToString();
   c->edit_.SetCompactPointer(level, largest);
 }

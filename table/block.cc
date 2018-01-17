@@ -168,6 +168,7 @@ class Block::Iter : public Iterator {
   }
 
   virtual void Seek(const Slice& target) {
+    // Seek 函数不是百分百能够定位到 k
     // Binary search in restart array to find the last restart point
     // with a key < target
     uint32_t left = 0;
@@ -199,6 +200,7 @@ class Block::Iter : public Iterator {
     // Linear search (within restart block) for first key >= target
     // 从left起始点开始线性查找，此时 key[left] < target，相当于 lower bound
     SeekToRestartPoint(left);
+    // 最后定位到 key >= target
     while (true) {
       if (!ParseNextKey()) {
         return;

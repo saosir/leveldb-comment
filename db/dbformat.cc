@@ -129,10 +129,13 @@ LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
     dst = new char[needed];
   }
   start_ = dst;
+  // klength
   dst = EncodeVarint32(dst, usize + 8);
   kstart_ = dst;
+  // userkey
   memcpy(dst, user_key.data(), usize);
   dst += usize;
+  // tag
   EncodeFixed64(dst, PackSequenceAndType(s, kValueTypeForSeek));
   dst += 8;
   end_ = dst;

@@ -508,6 +508,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   Status s;
   {
+    // 创建 ldbd 文件
     mutex_.Unlock();
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
@@ -533,7 +534,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
     edit->AddFile(level, meta.number, meta.file_size,
                   meta.smallest, meta.largest);
   }
-  // 统计性能
+  // 统计性能，记录每层的写入数据量
   CompactionStats stats;
   stats.micros = env_->NowMicros() - start_micros;
   stats.bytes_written = meta.file_size;
@@ -542,6 +543,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 }
 
 void DBImpl::CompactMemTable() {
+  // immemtable 写入磁盘
   mutex_.AssertHeld();
   assert(imm_ != NULL);
 
@@ -666,7 +668,9 @@ void DBImpl::MaybeScheduleCompaction() {
     // No work to be done
   } else {
     bg_compaction_scheduled_ = true;
+    // 将 BGWork 放入后台运行线程队列
     env_->Schedule(&DBImpl::BGWork, this);
+    // 运行之后 bg_compaction_scheduled_ 设置为 false
   }
 }
 
@@ -682,6 +686,7 @@ void DBImpl::BackgroundCall() {
   } else if (!bg_error_.ok()) {
     // No more background work after a background error.
   } else {
+    // 后台进行 compaction 
     BackgroundCompaction();
   }
 
@@ -689,6 +694,7 @@ void DBImpl::BackgroundCall() {
 
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
+  // compation 操作在同一level可能产生比较多文件，再次递归调用
   MaybeScheduleCompaction();
   bg_cv_.SignalAll();
 }
@@ -704,6 +710,7 @@ void DBImpl::BackgroundCompaction() {
   Compaction* c;
   bool is_manual = (manual_compaction_ != NULL);
   InternalKey manual_end;
+  // 手动 compact 首先
   if (is_manual) {
     ManualCompaction* m = manual_compaction_;
     c = versions_->CompactRange(m->level, m->begin, m->end);
@@ -718,6 +725,7 @@ void DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   } else {
+    // 从 level L 取出一个文件，从level L+1 取出所有与前者重合的 ldb 文件
     c = versions_->PickCompaction();
   }
 
@@ -726,6 +734,7 @@ void DBImpl::BackgroundCompaction() {
     // Nothing to do
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
+    // 只需要将 ldb 文件 移动到 level L+1
     assert(c->num_input_files(0) == 1);
     FileMetaData* f = c->input(0, 0);
     c->edit()->DeleteFile(c->level(), f->number);
@@ -1139,6 +1148,7 @@ Status DBImpl::Get(const ReadOptions& options,
   Version::GetStats stats;
 
   // Unlock while reading from files and memtables
+  // 分别按顺序从memtable immemtable ldb 文件查找
   {
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
@@ -1149,6 +1159,7 @@ Status DBImpl::Get(const ReadOptions& options,
     } else if (imm != NULL && imm->Get(lkey, value, &s)) {
       // Done
     } else {
+      // 从 ldb 文件查找
       s = current->Get(options, lkey, value, &stats);
       have_stat_update = true;
     }

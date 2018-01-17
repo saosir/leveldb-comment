@@ -18,7 +18,7 @@ Status BuildTable(const std::string& dbname,
                   Env* env,
                   const Options& options,
                   TableCache* table_cache,
-                  Iterator* iter, // memtable 迭代器
+                  Iterator* iter, // memtable 或者 immemtable 迭代器
                   FileMetaData* meta) {
   Status s;
   meta->file_size = 0;
@@ -31,7 +31,7 @@ Status BuildTable(const std::string& dbname,
     if (!s.ok()) {
       return s;
     }
-
+    // 写入k-v数据
     TableBuilder* builder = new TableBuilder(options, file);
     meta->smallest.DecodeFrom(iter->key());
     for (; iter->Valid(); iter->Next()) {

@@ -19,6 +19,14 @@ A copy of the current log file is kept in an in-memory structure (the
 `memtable`). This copy is consulted on every read so that read operations
 reflect all logged updates.
 
+log 文件存储最近的更新操作，每次更新都会顺序追加到 log 文件尾部。当 log 文件达到预先设置
+的阀值，就会转存为有序表 sstable，同时重新创建一个新的 log 文件。在内存中保存有一份 log 
+文件的副本 memtable，每次读操作都会查询这个 memtable，由于 memtable 内部实现为跳跃表 skip list，
+因此查询和插入性能可以媲美平衡树。由于 log 文件是顺序写，memtable 保存在内存当中，因此 leveldb
+得到很好的写性能
+
+当关闭数据库或者系统崩溃的时候，由 log 文件可以完整的恢复 memtable
+
 ## Sorted tables
 
 A sorted table (*.ldb) stores a sequence of entries sorted by key. Each entry is
@@ -83,6 +91,12 @@ is special (files in it may overlap each other), we treat compactions from
 level-0 to level-1 specially: a level-0 compaction may pick more than one
 level-0 file in case some of these files overlap each other.
 
+当 level L 层文件大小超过阀值，在后台线程会进行 compaction 合并操作。compaction 先从
+level L 层选择一个 ldb 文件，然后再在 level L+1 层选择所有与前者 key 区间有重叠的 ldb 文件进行合并。
+即使 level L+1 的 ldb 文件与 level L 的 ldb 文件只有部分重合，也将整个文件进行 compaction，
+经过合并之后的 level L+1 文件将会被删除。另外，由于 level-0 比较特殊（每个文件之间的key可能有重叠）
+在level-0进行 compact的时候可能需要选出多个文件进行compact
+
 A compaction merges the contents of the picked files to produce a sequence of
 level-(L+1) files. We switch to producing a new level-(L+1) file after the
 current output file has reached the target file size (2MB). We also switch to a
@@ -92,6 +106,12 @@ compaction of a level-(L+1) file will not pick up too much data from
 level-(L+2).
 
 The old files are discarded and the new files are added to the serving state.
+
+compaction 操作合并多个 ldb 文件，并生成一系列 level L+1 层的 ldb 文件。如果当前 compaction 操作的输出文件达到目标阀值（2MB），
+就会生成一个新的 level L+1 文件。如果当前 compaction 操作的输出文件的 key 区间不断增长和 level L+2 的ldb文件重叠数量超过10个，也会
+生成一个新的 level L+1 文件。最后一个规则确保，后续 level L+1 文件的 compaction 操作不会从 level L+2 选择太多的数据进行合并。
+
+旧文件会被丢弃，新的文件会添加到 leveldb 当中并记录跟踪
 
 Compactions for a particular level rotate through the key space. In more detail,
 for each level L, we remember the ending key of the last compaction at level L.
@@ -161,6 +181,13 @@ So maybe even the sharding is not necessary on modern filesystems?
 * We could open all sstables here, but it is probably better to be lazy...
 * Convert log chunk to a new level-0 sstable
 * Start directing new writes to a new log file with recovered sequence#
+
+* 读取 CURRENT 文件得到最近生成的 MANIFEST 文件名
+* 读取 MANIFEST 文件
+* 清理过期文件
+* 我们可以打开所有 sstable 文件，但是为了提高性能可以采用延迟加载
+* 将 log 文件转换为 level-0 sstable
+* 开始导入写操作到一个新的 log 文件
 
 ## Garbage collection of files
 

@@ -162,6 +162,8 @@ static void ReleaseBlock(void* arg, void* h) {
 Iterator* Table::BlockReader(void* arg,
                              const ReadOptions& options,
                              const Slice& index_value) {
+  // 返回一个可遍历与索引block内容的迭代器
+  // data block 可能通过 cache 进行缓存
   Table* table = reinterpret_cast<Table*>(arg);
   Cache* block_cache = table->rep_->options.block_cache;
   Block* block = NULL;
@@ -181,22 +183,23 @@ Iterator* Table::BlockReader(void* arg,
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
       EncodeFixed64(cache_key_buffer+8, handle.offset());
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
+      // data block 也存在缓存
       cache_handle = block_cache->Lookup(key);
       if (cache_handle != NULL) {
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
       } else {
-        // 未找到cache从文件中读取data block 并插入cache
+        // 未找到cache从 ldb 文件中读取data block 并插入cache
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
           block = new Block(contents);
           if (contents.cachable && options.fill_cache) {
             cache_handle = block_cache->Insert(
-                key, block, block->size(), &DeleteCachedBlock);
+                key, block, block->size()/* block 块大小，默认block缓存大小8MB */, &DeleteCachedBlock);
           }
         }
       }
     } else {
-      // 不适用cache的情况，直接读取 ldb 文件
+      // data block 不使用 cache的情况，直接读取 ldb 文件
       s = ReadBlock(table->rep_->file, options, handle, &contents);
       if (s.ok()) {
         block = new Block(contents);
@@ -207,7 +210,7 @@ Iterator* Table::BlockReader(void* arg,
   Iterator* iter;
   if (block != NULL) {
     iter = block->NewIterator(table->rep_->options.comparator);
-    // 像迭代器注册资源释放回调函数
+    // 像迭代器注册资源释放回调函数，根据是否使用cache做不同处理
     if (cache_handle == NULL) {
       iter->RegisterCleanup(&DeleteBlock, block, NULL);
     } else {
@@ -221,8 +224,9 @@ Iterator* Table::BlockReader(void* arg,
 
 Iterator* Table::NewIterator(const ReadOptions& options) const {
   return NewTwoLevelIterator(
-      rep_->index_block->NewIterator(rep_->options.comparator),
-      &Table::BlockReader, const_cast<Table*>(this), options);
+      rep_->index_block->NewIterator(rep_->options.comparator), // 用于遍历 block
+      &Table::BlockReader, // 用于读取 block，获得block的迭代器
+      const_cast<Table*>(this), options);
 }
 
 Status Table::InternalGet(const ReadOptions& options, const Slice& k,
@@ -232,7 +236,7 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
   // 由 index block 索引到 data block
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);  
   // 定位到大于等于k的第一个元素
-  iiter->Seek(k);
+  iiter->Seek(k); // Block::Iterator 的 Seek 不是百分百定位到 k
   if (iiter->Valid()) {
     // 获取到block handle，并得到对应的 data block
     Slice handle_value = iiter->value();
@@ -243,10 +247,12 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
         !filter->KeyMayMatch(handle.offset(), k)) {
       // Not found
     } else {
+      // 读取定位到的data block到内存，有block_iter解析查找 k
       Iterator* block_iter = BlockReader(this, options, iiter->value());
       // 定位到大于等于k的第一个元素
       block_iter->Seek(k);
       if (block_iter->Valid()) {
+        // 由于 block_iter->Seek并不能百分百定位key，saver函数会进一步处理解决这个问题
         (*saver)(arg, block_iter->key(), block_iter->value());
       }
       s = block_iter->status();

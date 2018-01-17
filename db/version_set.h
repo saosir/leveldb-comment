@@ -138,13 +138,14 @@ class Version {
   std::vector<FileMetaData*> files_[config::kNumLevels]; // 每层level的所有sst文件
 
   // Next file to compact based on seek stats.
+  // ldb文件seek次数过多导致 compact
   FileMetaData* file_to_compact_;
   int file_to_compact_level_;
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
-  // 下次最适合compaction的level，分数score小于1表示不需要compaction
+  // 下次最适合compaction的level，分数score根据数据量计算，小于1表示不需要compaction
   double compaction_score_;
   int compaction_level_;
 
@@ -308,14 +309,15 @@ class VersionSet {
 
   // Opened lazily
   // manifest文件
-  WritableFile* descriptor_file_;
-  log::Writer* descriptor_log_;
+  WritableFile* descriptor_file_; // 实际读写文件实例
+  log::Writer* descriptor_log_; // 操作 descriptor_file_
   // 链表头
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
+  // 下一次 compact 的起始 key
   std::string compact_pointer_[config::kNumLevels];
 
   // No copying allowed

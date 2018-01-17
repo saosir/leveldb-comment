@@ -44,7 +44,7 @@ TableCache::~TableCache() {
 
 Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
                              Cache::Handle** handle) {
-  // 从 ldb 文件查找，读取 ldb文件
+  // 首先查询cache中是否已经打开ldb文件，否则读取 ldb 文件到内存并放入缓存
   Status s;
   char buf[sizeof(file_number)];
   EncodeFixed64(buf, file_number);
@@ -75,7 +75,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
       // We do not cache error results so that if the error is transient,
       // or somebody repairs the file, we recover automatically.
     } else {
-     // 插入cache
+     // 插入cache，得到 handle 内部句柄
       TableAndFile* tf = new TableAndFile;
       tf->file = file;
       tf->table = table;
@@ -89,6 +89,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
                                   uint64_t file_number,
                                   uint64_t file_size,
                                   Table** tableptr) {
+  // 取得文件编号为 file_number 的 sstable
   if (tableptr != NULL) {
     *tableptr = NULL;
   }
@@ -115,10 +116,11 @@ Status TableCache::Get(const ReadOptions& options,
                        void* arg,
                        void (*saver)(void*, const Slice&, const Slice&)) {
   Cache::Handle* handle = NULL;
+  // handle 中存储着 file_number 对应的 ldb 文件上下文 TableAndFile
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
-    // 从 sstable 中查找
+    // 从 ldb 文件中查找
     s = t->InternalGet(options, k, arg, saver);
     cache_->Release(handle);
   }

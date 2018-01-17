@@ -317,6 +317,7 @@ Cache::Handle* LRUCache::Insert(
 // If e != NULL, finish removing *e from the cache; it has already been removed
 // from the hash table.  Return whether e != NULL.  Requires mutex_ held.
 bool LRUCache::FinishErase(LRUHandle* e) {
+  // table_.Insert 有可能返回旧的节点，也有可能返回NULL
   if (e != NULL) {
     assert(e->in_cache);
     LRU_Remove(e);

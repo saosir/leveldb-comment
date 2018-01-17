@@ -18,6 +18,7 @@ namespace leveldb {
 
 class Env;
 
+// TableCache 负责管理 ldb 文件的读写查找，同时为了加速查找速度，具备缓存功能
 class TableCache {
  public:
   TableCache(const std::string& dbname, const Options* options, int entries);

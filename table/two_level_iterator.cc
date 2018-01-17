@@ -154,15 +154,16 @@ void TwoLevelIterator::SetDataIterator(Iterator* data_iter) {
 }
 
 void TwoLevelIterator::InitDataBlock() {
+  // 根据 index_iter 将 data_iter 定位到对应的 block
   if (!index_iter_.Valid()) {
     SetDataIterator(NULL);
   } else {
-    Slice handle = index_iter_.value();
+    Slice handle = index_iter_.value(); // Table 的 BlockHandle
     if (data_iter_.iter() != NULL && handle.compare(data_block_handle_) == 0) {
       // data_iter_ is already constructed with this iterator, so
       // no need to change anything
     } else {
-      Iterator* iter = (*block_function_)(arg_, options_, handle);
+      Iterator* iter = (*block_function_)(arg_, options_, handle); // 读取 Block 得到对应的迭代器
       data_block_handle_.assign(handle.data(), handle.size());
       SetDataIterator(iter);
     }
@@ -176,6 +177,9 @@ Iterator* NewTwoLevelIterator(
     BlockFunction block_function,
     void* arg,
     const ReadOptions& options) {
+  // 双层迭代器，相当于两层for循环，
+  // 第一层遍历 index_iter，
+  // 第二层遍历由 block_function 返回的迭代器
   return new TwoLevelIterator(index_iter, block_function, arg, options);
 }
 
