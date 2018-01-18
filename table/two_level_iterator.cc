@@ -14,7 +14,7 @@ namespace leveldb {
 namespace {
 
 typedef Iterator* (*BlockFunction)(void*, const ReadOptions&, const Slice&);
-
+// 两层迭代器，一层根据索引 index_iter ，二层有索引返回 block 的 迭代器，相当于遍历二位数组
 class TwoLevelIterator: public Iterator {
  public:
   TwoLevelIterator(
@@ -123,6 +123,7 @@ void TwoLevelIterator::Prev() {
 
 
 void TwoLevelIterator::SkipEmptyDataBlocksForward() {
+  // 确认 data_iter_ 是否已经遍历完当前的 block，递进 index_iter 索引迭代器
   while (data_iter_.iter() == NULL || !data_iter_.Valid()) {
     // Move to next block
     if (!index_iter_.Valid()) {

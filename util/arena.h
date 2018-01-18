@@ -12,7 +12,10 @@
 #include "port/port.h"
 
 namespace leveldb {
-
+// 每次申请内存至少 kBlockSize=4k，如果用户请求大于1k直接分配一块，
+// 并把地址放到 blocks_ 临时保存，如果请求小内存则分配一块block到alloc_ptr_，
+// 每次从这个block中分配小内存给用户使用，用完之后再分配一块，删除 Arena
+// 的时候再批量释放保存在 blocks_ 内的所有内存块
 class Arena {
  public:
   Arena();

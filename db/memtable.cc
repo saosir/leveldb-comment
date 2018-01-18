@@ -101,7 +101,7 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   p += key_size;
   EncodeFixed64(p, (s << 8) | type); // seq:type
   p += 8;
-  // 2. 存储 value
+  // 2. 存储 value, 如果是删除 val_size == 0
   p = EncodeVarint32(p, val_size); // value size
   memcpy(p, value.data(), val_size); // value data
   assert((p + val_size) - buf == encoded_len);

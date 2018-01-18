@@ -69,6 +69,7 @@ class MergingIterator : public Iterator {
         IteratorWrapper* child = &children_[i];
         if (child != current_) {
           child->Seek(key());
+          // 重复相等的key会被忽略，因为 current_ 是最新的key
           if (child->Valid() &&
               comparator_->Compare(key(), child->key()) == 0) {
             child->Next();
@@ -153,13 +154,16 @@ class MergingIterator : public Iterator {
 };
 
 void MergingIterator::FindSmallest() {
+  // 每个迭代器都访问一次进行比较
   IteratorWrapper* smallest = NULL;
+  // 向前遍历
   for (int i = 0; i < n_; i++) {
     IteratorWrapper* child = &children_[i];
     if (child->Valid()) {
       if (smallest == NULL) {
         smallest = child;
       } else if (comparator_->Compare(child->key(), smallest->key()) < 0) {
+        // 注意是小于不是小于等于，出现相等的key会被忽略
         smallest = child;
       }
     }
@@ -169,6 +173,7 @@ void MergingIterator::FindSmallest() {
 
 void MergingIterator::FindLargest() {
   IteratorWrapper* largest = NULL;
+  // 逆序遍历
   for (int i = n_-1; i >= 0; i--) {
     IteratorWrapper* child = &children_[i];
     if (child->Valid()) {

@@ -110,7 +110,7 @@ inline ValueType ExtractValueType(const Slice& internal_key) {
 
 // A comparator for internal keys that uses a specified comparator for
 // the user key portion and breaks ties by decreasing sequence number.
-// 其中 `seq+type` 占 8 bytes，按照`varint`编码，低8位为 `type`，按照`user_key`升序，`seq`降序，`type`降序排序
+// 其中 `seq+type` 占 8 bytes，低8位为 `type`，按照`user_key`升序，`seq`降序，`type`降序排序
 
 class InternalKeyComparator : public Comparator {
  private:
@@ -179,6 +179,8 @@ inline int InternalKeyComparator::Compare(
 
 inline bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result) {
+  // key[n-8]
+  // seq|type 8bytes
   const size_t n = internal_key.size();
   if (n < 8) return false;
   uint64_t num = DecodeFixed64(internal_key.data() + n - 8);

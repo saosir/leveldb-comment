@@ -246,6 +246,8 @@ class Block::Iter : public Iterator {
     // Decode next entry
     uint32_t shared, non_shared, value_length;
     p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);
+    // 第一次遍历，得到的是restart指向的某个block的起始记录， shared 必须为0 ,
+    // 因此 key.size() == 0
     if (p == NULL || key_.size() < shared) {
       CorruptionError();
       return false;

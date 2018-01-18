@@ -164,6 +164,7 @@ void DBIter::Next() {
     // saved_key_ already contains the key to skip past.
   } else {
     // Store in saved_key_ the current key so we skip it below.
+    // 如果访问到重复的key，则忽略跳过
     SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
   }
 
@@ -181,12 +182,14 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
         case kTypeDeletion:
           // Arrange to skip all upcoming entries for this key since
           // they are hidden by this deletion.
+          // 删除的话，后面访问到的相同key都会被忽略
           SaveKey(ikey.user_key, skip);
           skipping = true;
           break;
         case kTypeValue:
           if (skipping &&
               user_comparator_->Compare(ikey.user_key, *skip) <= 0) {
+            // 重复的key会被忽略
             // Entry hidden
           } else {
             valid_ = true;
@@ -236,6 +239,7 @@ void DBIter::FindPrevUserEntry() {
   if (iter_->Valid()) {
     do {
       ParsedInternalKey ikey;
+      // 逆序遍历，如果遇到相等的key，取最后一个key
       if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
         if ((value_type != kTypeDeletion) &&
             user_comparator_->Compare(ikey.user_key, saved_key_) < 0) {

@@ -125,7 +125,7 @@ class MemTableInserter : public WriteBatch::Handler {
     sequence_++;
   }
   virtual void Delete(const Slice& key) {
-    mem_->Add(sequence_, kTypeDeletion, key, Slice());
+    mem_->Add(sequence_, kTypeDeletion, key, Slice()); // 如果是删除，则值为空
     sequence_++;
   }
 };
@@ -134,6 +134,7 @@ class MemTableInserter : public WriteBatch::Handler {
 Status WriteBatchInternal::InsertInto(const WriteBatch* b,
                                       MemTable* memtable) {
   MemTableInserter inserter;
+  // 每个插入 memtable的 节点都会附加上 seq
   inserter.sequence_ = WriteBatchInternal::Sequence(b);
   inserter.mem_ = memtable;
   return b->Iterate(&inserter);

@@ -164,7 +164,9 @@ bool SomeFileOverlapsRange(
 // is the largest key that occurs in the file, and value() is an
 // 16-byte value containing the file number and file size, both
 // encoded using EncodeFixed64.
-// icmp 比较函数 flist 某层文件集合
+// icmp 比较函数 
+// flist 某层文件集合
+// 遍历 level L 层 ldb 文件, key()返回 ldb 文件最大的key, value()返回对应的文件序号和大小
 class Version::LevelFileNumIterator : public Iterator {
  public:
   LevelFileNumIterator(const InternalKeyComparator& icmp,
@@ -200,7 +202,7 @@ class Version::LevelFileNumIterator : public Iterator {
     assert(Valid());
     return (*flist_)[index_]->largest.Encode();
   }
-  // num 和 size 经过 encodefixed64 编码的缓存，16bytes
+  // num 和 size 经过 encodefixed64 编码的缓存，16bytes, 参看函数GetFileIterator
   Slice value() const {
     assert(Valid());
     EncodeFixed64(value_buf_, (*flist_)[index_]->number);
@@ -251,6 +253,8 @@ void Version::AddIterators(const ReadOptions& options,
   // For levels > 0, we can use a concatenating iterator that sequentially
   // walks through the non-overlapping files in the level, opening them
   // lazily.
+  // level > 0 的ldb文件同一层之间不存在交集，集中放到一个迭代器里面，这样
+  // 可以加快访问速度，在merge迭代器中遍历寻找最小key的时候减少比较次数
   for (int level = 1; level < config::kNumLevels; level++) {
     if (!files_[level].empty()) {
       iters->push_back(NewConcatenatingIterator(options, level));
@@ -735,6 +739,7 @@ class VersionSet::Builder {
   // Save the current state in *v.
   void SaveTo(Version* v) {
     BySmallestKey cmp;
+    // 最终确保 Version 中的levels_有序
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
       // Merge the set of added files with the set of pre-existing files.
@@ -848,6 +853,7 @@ void VersionSet::AppendVersion(Version* v) {
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
+  // 创建一个新版本，并将对 leveldb 文件的修改清空写入到 manifest
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
     assert(edit->log_number_ < next_file_number_);
@@ -1049,7 +1055,7 @@ Status VersionSet::Recover(bool *save_manifest) {
     builder.SaveTo(v);
     // Install recovered version
     Finalize(v);
-    // 得到新的version
+    // 得到新的version，current_指向 version
     AppendVersion(v);
     manifest_file_number_ = next_file;
     next_file_number_ = next_file + 1;
@@ -1313,6 +1319,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
 
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
+  // level-0 的文件都要进行merged，创建space为 size+1，如果是其他层 space为2
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
   const int space = (c->level() == 0 ? c->inputs_[0].size() + 1 : 2);
   Iterator** list = new Iterator*[space];
@@ -1320,12 +1327,14 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   for (int which = 0; which < 2; which++) {
     if (!c->inputs_[which].empty()) {
       if (c->level() + which == 0) {
+        // level-0 的情况
         const std::vector<FileMetaData*>& files = c->inputs_[which];
         for (size_t i = 0; i < files.size(); i++) {
           list[num++] = table_cache_->NewIterator(
               options, files[i]->number, files[i]->file_size);
         }
       } else {
+        // level > 0 的情况
         // Create concatenating iterator for the files from this level
         list[num++] = NewTwoLevelIterator(
             new Version::LevelFileNumIterator(icmp_, &c->inputs_[which]),
@@ -1334,6 +1343,8 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
     }
   }
   assert(num <= space);
+  // 将所有迭代器合并，MergingIterator 的算法效率较低，每遍历一个元素都会比较所有的迭代器找
+  // 到最小的值
   Iterator* result = NewMergingIterator(&icmp_, list, num);
   delete[] list;
   return result;
@@ -1481,6 +1492,7 @@ Compaction* VersionSet::CompactRange(
   // and we must not pick one file and drop another older file if the
   // two files overlap.
   if (level > 0) {
+    // 限制 compaction 量太大
     const uint64_t limit = MaxFileSizeForLevel(options_, level);
     uint64_t total = 0;
     for (size_t i = 0; i < inputs.size(); i++) {
@@ -1540,6 +1552,7 @@ void Compaction::AddInputDeletions(VersionEdit* edit) {
 bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
   // Maybe use binary search to find right entry instead of linear search?
   const Comparator* user_cmp = input_version_->vset_->icmp_.user_comparator();
+  // 确认 user_key 与 level+2层之后没有交集
   for (int lvl = level_ + 2; lvl < config::kNumLevels; lvl++) {
     const std::vector<FileMetaData*>& files = input_version_->files_[lvl];
     for (; level_ptrs_[lvl] < files.size(); ) {
@@ -1550,6 +1563,7 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
           // Key falls in this file's range, so definitely not base level
           return false;
         }
+        // 小于 largest 且 level > 0 说明与后面的 ldb 文件也没有交集
         break;
       }
       level_ptrs_[lvl]++;

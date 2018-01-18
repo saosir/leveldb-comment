@@ -182,14 +182,14 @@ Status DBImpl::NewDB() {
   new_db.SetNextFile(2);
   new_db.SetLastSequence(0);
 
-  const std::string manifest = DescriptorFileName(dbname_, 1);
+  const std::string manifest = DescriptorFileName(dbname_, 1);//manifest.1
   WritableFile* file;
   Status s = env_->NewWritableFile(manifest, &file);
   if (!s.ok()) {
     return s;
   }
   {
-    log::Writer log(file);
+    log::Writer log(file);//写入manifest文件一条记录
     std::string record;
     new_db.EncodeTo(&record);
     s = log.AddRecord(record);
@@ -302,7 +302,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
           dbname_, "exists (error_if_exists is true)");
     }
   }
-
+  // 读取 manifest 文件，得到 leveldb ldb文件分布情况
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
@@ -346,7 +346,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   }
 
   // Recover in the order in which the logs were generated
-  // 顺序通过log文件恢复到memtable，如果memtable超过限值进行compation
+  // 通过log文件恢复到memtable，如果memtable超过限值进行compation
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
@@ -508,7 +508,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   Status s;
   {
-    // 创建 ldbd 文件
+    // 创建 ldb 文件
     mutex_.Unlock();
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
@@ -713,6 +713,7 @@ void DBImpl::BackgroundCompaction() {
   // 手动 compact 首先
   if (is_manual) {
     ManualCompaction* m = manual_compaction_;
+    // compact level L 范围[begin:end) 的key
     c = versions_->CompactRange(m->level, m->begin, m->end);
     m->done = (c == NULL);
     if (c != NULL) {
@@ -805,6 +806,7 @@ void DBImpl::CleanupCompaction(CompactionState* compact) {
 }
 
 Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
+  // 在 compaction 过程中创建一个 ldb 文件用于输出 compaction 数据
   assert(compact != NULL);
   assert(compact->builder == NULL);
   uint64_t file_number;
@@ -831,6 +833,7 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
 
 Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
                                           Iterator* input) {
+  // 在 compaction 过程中完成一个 ldb 文件的输出
   assert(compact != NULL);
   assert(compact->outfile != NULL);
   assert(compact->builder != NULL);
@@ -883,6 +886,7 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
 
 
 Status DBImpl::InstallCompactionResults(CompactionState* compact) {
+  // 对 leveldb 文件结构做了修改，需要记录并写入到 manifest
   mutex_.AssertHeld();
   Log(options_.info_log,  "Compacted %d@%d + %d@%d files => %lld bytes",
       compact->compaction->num_input_files(0),
@@ -924,7 +928,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
   // Release mutex while we're actually doing the compaction work
   mutex_.Unlock();
-
+  // comapct 合并迭代器，可以顺序遍历需要被 compaction 的 ldb 文件内容
   Iterator* input = versions_->MakeInputIterator(compact->compaction);
   input->SeekToFirst();
   Status status;
@@ -956,6 +960,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     // Handle key/value, add to state, etc.
     bool drop = false;
+    // 解析key
     if (!ParseInternalKey(key, &ikey)) {
       // Do not hide error keys
       current_user_key.clear();
@@ -970,7 +975,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         has_current_user_key = true;
         last_sequence_for_key = kMaxSequenceNumber;
       }
-
+      // key 第一次出现的话为 kMaxSequenceNumber，如果key重复出现会被忽略
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
         drop = true;    // (A)
@@ -1007,6 +1012,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
           break;
         }
       }
+      // 记录最大最小 key
       if (compact->builder->NumEntries() == 0) {
         compact->current_output()->smallest.DecodeFrom(key);
       }
