@@ -108,6 +108,7 @@ Options SanitizeOptions(const std::string& dbname,
       result.info_log = NULL;
     }
   }
+  // 默认会创建block缓存
   if (result.block_cache == NULL) {
     result.block_cache = NewLRUCache(8 << 20);
   }
@@ -262,6 +263,7 @@ void DBImpl::DeleteObsoleteFiles() {
 
       if (!keep) {
         if (type == kTableFile) {
+          // 如果是 ldb 文件，需要从LRU缓存中移除
           table_cache_->Evict(number);
         }
         Log(options_.info_log, "Delete type=%d #%lld\n",

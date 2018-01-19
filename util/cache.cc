@@ -296,12 +296,13 @@ Cache::Handle* LRUCache::Insert(
     e->in_cache = true;
     LRU_Append(&in_use_, e);
     usage_ += charge;
-    FinishErase(table_.Insert(e)); // table_.Insert 操作有可能返回旧的节点，此处从cache中删除
+    // table_.Insert 操作有可能覆盖旧的节点并返回，此处从cache中删除table中旧节点
+    FinishErase(table_.Insert(e));
   } else {  // don't cache. (capacity_==0 is supported and turns off caching.)
     // next is read by key() in an assert, so it must be initialized
     e->next = NULL;
   }
-  // 容量较大，需要删除旧缓存
+  // 容量较大，需要删除旧缓存，从lru表头开始顺序删除
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
