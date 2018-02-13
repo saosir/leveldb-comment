@@ -626,6 +626,7 @@ std::string Version::DebugString() const {
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
 // Versions that contain full copies of the intermediate state.
+// Builder 的作用就是构建 leveldb 中 ldb 文件的分层结构
 class VersionSet::Builder {
  private:
   // Helper to sort by v->files_[file_number].smallest
@@ -951,7 +952,7 @@ Status VersionSet::Recover(bool *save_manifest) {
   };
 
   // Read "CURRENT" file, which contains a pointer to the current manifest file
-  // 获取到当前的 manifest 文件名
+  // 读取 CURRENT 文件获取到当前的 manifest 文件名
   std::string current;
   Status s = ReadFileToString(env_, CurrentFileName(dbname_), &current);
   if (!s.ok()) {

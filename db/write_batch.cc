@@ -48,7 +48,7 @@ Status WriteBatch::Iterate(Handler* handler) const {
   if (input.size() < kHeader) {
     return Status::Corruption("malformed WriteBatch (too small)");
   }
-
+  // 得到键值操作记录，并应用到 memtable 当中，这样就能够恢复 memtable 的数据结构
   input.remove_prefix(kHeader);
   Slice key, value;
   int found = 0;

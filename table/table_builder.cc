@@ -40,7 +40,7 @@ struct TableBuilder::Rep {
   //
   // Invariant: r->pending_index_entry is true only if data_block is empty.
   bool pending_index_entry;
-  BlockHandle pending_handle;  // Handle to add to index block
+  BlockHandle pending_handle;  // Handle to add to index block 记录当前处理的block的索引信息
 
   std::string compressed_output;
 
@@ -93,13 +93,16 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
   if (!ok()) return;
+  // key 需要是顺序的
   if (r->num_entries > 0) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
+  // data_block为空的时候说明刚开始创建一个data block，记录data block的index
   if (r->pending_index_entry) {
-    assert(r->data_block.empty()); // data_block为空
-    // 记录data block的index，计算当前block第一个key与上一个block最后一个key的共同前缀
+    assert(r->data_block.empty()); 
+    
+    // 计算当前block第一个key与上一个block最后一个key的共同前缀
     // 键为共同前缀，值为上一个block的位置信息
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
@@ -116,6 +119,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   r->num_entries++;
   r->data_block.Add(key, value);
 
+  // 当前的block超过阀值，写入文件
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
   if (estimated_block_size >= r->options.block_size) {
     Flush();
@@ -131,16 +135,15 @@ void TableBuilder::Flush() {
   assert(!r->pending_index_entry);
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
-    // 重新统计 data block 信息
-    r->pending_index_entry = true;
+    r->pending_index_entry = true; // 有需要添加到 index block 的索引
     r->status = r->file->Flush();
   }
-  // 存在 filter block，记录当前 block 结束位置偏移
   if (r->filter_block != NULL) {
     r->filter_block->StartBlock(r->offset);
   }
 }
 
+// 写入 block，并得到改block的索引信息
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
@@ -221,6 +224,7 @@ Status TableBuilder::Finish() {
                   &filter_block_handle);
   }
 
+  // 写入 meta block
   // Write metaindex block
   if (ok()) {
     BlockBuilder meta_index_block(&r->options);
@@ -236,10 +240,11 @@ Status TableBuilder::Finish() {
     // TODO(postrelease): Add stats and other meta blocks 预留接口，用于写入统计信息
     WriteBlock(&meta_index_block, &metaindex_block_handle);
   }
-
+  // 写入索引信息
   // Write index block
   if (ok()) {
-    if (r->pending_index_entry) { // flush调用被设置true，记录最后一个data block的index
+    // 记录最后一个data block的index
+    if (r->pending_index_entry) { 
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
       r->pending_handle.EncodeTo(&handle_encoding);
@@ -249,6 +254,7 @@ Status TableBuilder::Finish() {
     WriteBlock(&r->index_block, &index_block_handle);
   }
 
+  // 写入footer，主要包含两个信息，就是 meta block 和 index block 的偏移与大小
   // Write footer
   if (ok()) {
     Footer footer;

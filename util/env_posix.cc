@@ -661,6 +661,7 @@ PosixEnv::PosixEnv()
   PthreadCall("cvar_init", pthread_cond_init(&bgsignal_, NULL));
 }
 
+// 将任务 function 函数放入队列
 void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   PthreadCall("lock", pthread_mutex_lock(&mu_));
 
@@ -678,7 +679,6 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   if (queue_.empty()) {
     PthreadCall("signal", pthread_cond_signal(&bgsignal_));
   }
-  // 将任务放入队列
   // Add to priority queue
   queue_.push_back(BGItem());
   queue_.back().function = function;
@@ -688,7 +688,7 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
 }
 
 void PosixEnv::BGThread() {
-  // 后端线程一直死循环
+  // 后端线程一直死循环，不断从任务队列中获取任务执行
   while (true) {
     // Wait until there is an item that is ready to run
     PthreadCall("lock", pthread_mutex_lock(&mu_));

@@ -120,7 +120,7 @@ class DBImpl : public DB {
 
   // Constant after construction
   Env* const env_;
-  const InternalKeyComparator internal_comparator_;
+  const InternalKeyComparator internal_comparator_; // 内部键的比较函数
   const InternalFilterPolicy internal_filter_policy_;
   const Options options_;  // options_.comparator == &internal_comparator_
   bool owns_info_log_;

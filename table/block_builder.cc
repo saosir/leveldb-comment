@@ -74,6 +74,7 @@ Slice BlockBuilder::Finish() {
 }
 
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
+  // 将键值对添加到 block，key只保存于前一个键的差异部分
   Slice last_key_piece(last_key_);
   assert(!finished_);
   assert(counter_ <= options_->block_restart_interval);
@@ -81,15 +82,18 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
          || options_->comparator->Compare(key, last_key_piece) > 0);
   size_t shared = 0;
   // 不会存储全部key，而是将共有部分提取出来，存储差异部分
+
+  // 一个重启点之后跟着 block_restart_interval 个键
   if (counter_ < options_->block_restart_interval) {
     // See how much sharing to do with previous string
     const size_t min_length = std::min(last_key_piece.size(), key.size());
+    // 得到与 last_key_ 前缀相同的长度
     while ((shared < min_length) && (last_key_piece[shared] == key[shared])) {
       shared++;
     }
   } else {
     // Restart compression
-    // 每间隔counter_个点完全存储key，不进行压缩存储
+    // 每间隔counter_个点完全存储key，不进行压缩存储，记录当前重启点位置
     restarts_.push_back(buffer_.size());
     counter_ = 0;
   }
@@ -104,7 +108,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   buffer_.append(key.data() + shared, non_shared);
   buffer_.append(value.data(), value.size());
 
-  // Update state 更新last_key_
+  // Update state 更新last_key_，扩展非共享部分
   last_key_.resize(shared);
   last_key_.append(key.data() + shared, non_shared);
   assert(Slice(last_key_) == key);

@@ -23,7 +23,7 @@ Status BuildTable(const std::string& dbname,
   Status s;
   meta->file_size = 0;
   iter->SeekToFirst();
-
+  // ldb 文件名
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
     WritableFile* file;
@@ -36,7 +36,7 @@ Status BuildTable(const std::string& dbname,
     meta->smallest.DecodeFrom(iter->key());
     for (; iter->Valid(); iter->Next()) {
       Slice key = iter->key();
-      meta->largest.DecodeFrom(key);
+      meta->largest.DecodeFrom(key); // 记录最大 key
       builder->Add(key, iter->value());
     }
 

@@ -238,6 +238,7 @@ void DBImpl::DeleteObsoleteFiles() {
       bool keep = true;
       switch (type) {
         case kLogFile:
+          // 小于 LogNumber 的 log 文件将会被清理
           keep = ((number >= versions_->LogNumber()) ||
                   (number == versions_->PrevLogNumber()));
           break;
@@ -320,6 +321,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   // produced by an older version of leveldb.
   const uint64_t min_log = versions_->LogNumber();
   const uint64_t prev_log = versions_->PrevLogNumber();
+  // 得到数据库下所有文件
   std::vector<std::string> filenames;
   s = env_->GetChildren(dbname_, &filenames);
   if (!s.ok()) {
@@ -330,11 +332,12 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   uint64_t number;
   FileType type;
   std::vector<uint64_t> logs; // .log文件集合
-  // 获取所有 log 文件
+
   for (size_t i = 0; i < filenames.size(); i++) {
-    // 根据文件名取得文件类型与文件编号
+    // 解析文件名，取得文件类型与文件编号
     if (ParseFileName(filenames[i], &number, &type)) {
       expected.erase(number);
+      // 获取所有没有处理过的 log 文件，注意条件 number >= min_log
       if (type == kLogFile && ((number >= min_log) || (number == prev_log)))
         logs.push_back(number);
     }
@@ -348,7 +351,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
   }
 
   // Recover in the order in which the logs were generated
-  // 通过log文件恢复到memtable，如果memtable超过限值进行compation
+  // 将log文件排序后，解析内容并复原memtable，如果memtable超过限值则进行compation
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
@@ -426,6 +429,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
           record.size(), Status::Corruption("log record too small"));
       continue;
     }
+    // 一条记录可能有多个操作动作
     WriteBatchInternal::SetContents(&batch, record);
 
     if (mem == NULL) {
@@ -441,11 +445,12 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     const SequenceNumber last_seq =
         WriteBatchInternal::Sequence(&batch) +
         WriteBatchInternal::Count(&batch) - 1;
+    // 记录最大log操作序列号
     if (last_seq > *max_sequence) {
       *max_sequence = last_seq;
     }
 
-    // 超过内存阀值，需要将mem进行compaction
+    // 超过内存阀值，需要将mem写到level-0
     if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
       compactions++;
       *save_manifest = true;
@@ -484,7 +489,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       }
     }
   }
-  // 每次都将从log文件得到memtable compation，如果开启 resue_logs 选项，最后一个log文件例外
+  // 将 memtable 持久化 sst
   if (mem != NULL) {
     // mem did not get reused; compact it.
     if (status.ok()) {
@@ -497,6 +502,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   return status;
 }
 
+// 将memtable 写入 level-0
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
@@ -526,6 +532,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
+  // 更新 VersionEdit
   int level = 0;
   if (s.ok() && meta.file_size > 0) {
     const Slice min_user_key = meta.smallest.user_key();
@@ -1541,7 +1548,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
   Status s = impl->Recover(&edit /* log文件恢复有可能生成ldb文件 */, &save_manifest);
   if (s.ok() && impl->mem_ == NULL) {
     // Create new log and a corresponding memtable.
-    // 没有memtable，创建log文件和与log关联的memtable
+    // 没有memtable，创建log文件以及与之关联的memtable
     uint64_t new_log_number = impl->versions_->NewFileNumber();
     WritableFile* lfile;
     s = options.env->NewWritableFile(LogFileName(dbname, new_log_number),

@@ -301,10 +301,10 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
-  uint64_t next_file_number_;
-  uint64_t manifest_file_number_;
-  uint64_t last_sequence_;
-  uint64_t log_number_;
+  uint64_t next_file_number_; // 下一个创建文件的时候使用的序号
+  uint64_t manifest_file_number_; // 当前 manifest 文件的序号
+  uint64_t last_sequence_; // 当前操作日志的序列号，用于写入 log 文件
+  uint64_t log_number_; // 当前 log 文件的序列号
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
