@@ -1367,7 +1367,7 @@ Compaction* VersionSet::PickCompaction() {
     c = new Compaction(options_, level);
 
     // Pick the first file that comes after compact_pointer_[level]
-    // 找到 compact_pointer_[level] 后续第一个 ldb 文件
+    // 找到 compact_pointer_[level] 之后第一个 ldb 文件
     for (size_t i = 0; i < current_->files_[level].size(); i++) {
       FileMetaData* f = current_->files_[level][i];
       if (compact_pointer_[level].empty() ||
